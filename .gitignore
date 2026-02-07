@@ -1,0 +1,38 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data & models (tracked by DVC)
+data/01_raw/
+data/02_processed/
+data/03_features/
+data/04_predictions/
+models/*.joblib
+models/*.pkl
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Misc
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+*.log
+.DS_Store
