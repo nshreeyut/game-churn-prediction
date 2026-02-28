@@ -1,4 +1,4 @@
-.PHONY: install setup lint format typecheck test train dashboard collect features pipeline mlflow-ui clean clean-all help
+.PHONY: install setup lint format typecheck test train collect features pipeline mlflow-ui clean clean-all help
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -10,12 +10,12 @@ setup: install ## Install dependencies and set up pre-commit hooks
 	uv run pre-commit install
 
 lint: ## Run linter and format check
-	uv run ruff check src/ tests/ dashboard/
-	uv run ruff format --check src/ tests/ dashboard/
+	uv run ruff check src/ tests/
+	uv run ruff format --check src/ tests/
 
 format: ## Auto-format code
-	uv run ruff check --fix src/ tests/ dashboard/
-	uv run ruff format src/ tests/ dashboard/
+	uv run ruff check --fix src/ tests/
+	uv run ruff format src/ tests/
 
 typecheck: ## Run mypy type checker
 	uv run mypy src/
@@ -35,8 +35,6 @@ train: ## Train all models with MLflow tracking
 pipeline: ## Run the full Prefect pipeline (collect -> features -> train)
 	uv run python -m game_churn.pipelines.prefect_flow
 
-dashboard: ## Launch Streamlit dashboard
-	uv run streamlit run dashboard/app.py
 
 mlflow-ui: ## Launch MLflow experiment tracking UI
 	uv run mlflow ui --backend-store-uri sqlite:///.mlflow/mlflow.db
