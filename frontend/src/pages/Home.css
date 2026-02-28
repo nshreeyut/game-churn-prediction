@@ -1,0 +1,37 @@
+/*
+ * Home Page Layout Styles
+ * ========================
+ * TODO: Customize these to match your design.
+ */
+
+.home-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Two-column layout for analytics + chat */
+.results-layout {
+  display: grid;
+  grid-template-columns: 3fr 2fr;  /* analytics gets 60%, chat gets 40% */
+  gap: 1.5rem;
+  align-items: start;
+}
+
+/* On smaller screens, stack the columns vertically */
+@media (max-width: 900px) {
+  .results-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  text-align: center;
+  color: #888;
+  gap: 1rem;
+}

@@ -1,0 +1,13 @@
+/* TODO: Style the SHAP chart section */
+.shap-chart h3 {
+  font-size: 0.95rem;
+  color: #aaa;
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.shap-empty {
+  color: #666;
+  font-size: 0.875rem;
+}

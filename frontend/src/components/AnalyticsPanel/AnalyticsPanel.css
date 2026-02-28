@@ -1,0 +1,22 @@
+/* TODO: Style the analytics panel */
+.analytics-panel {
+  background: #1a1d2e;
+  border-radius: 8px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.analytics-panel.loading,
+.analytics-panel.error {
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+}
+
+.analytics-panel.error {
+  color: #e05c5c;
+}

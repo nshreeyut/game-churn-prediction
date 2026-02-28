@@ -12,6 +12,7 @@ PROCESSED_DIR = DATA_DIR / "02_processed"
 FEATURES_DIR = DATA_DIR / "03_features"
 PREDICTIONS_DIR = DATA_DIR / "04_predictions"
 MODELS_DIR = PROJECT_ROOT / "models"
+MLFLOW_DIR = PROJECT_ROOT / ".mlflow"
 
 
 class Settings(BaseSettings):
