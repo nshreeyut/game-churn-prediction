@@ -1,257 +1,168 @@
 # Implementation Workflow
 
-Track progress here. Check off each step as it's done. Add notes on blockers or decisions inline.
+Track progress here. Check off each step as it's done.
 
 **Legend:** `[ ]` not started · `[x]` done · `[-]` blocked/skipped
 
 ---
 
-## Pre-flight — Verify ML Artifacts
+## What's Already Built
 
-> The entire backend reads these files. Do this first.
-
-```bash
-make train
-```
-
-- [ ] `data/03_features/player_features.parquet` exists
-- [ ] `models/ensemble.joblib` exists
-- [ ] `models/scaler.joblib` exists
-- [ ] `models/shap_values.joblib` exists
-- [ ] Confirm real player IDs in the parquet: `python -c "import polars as pl; print(pl.read_parquet('data/03_features/player_features.parquet')[['player_id','platform']].head(5))"`
-
----
-
-## Phase 1 — Backend Services
-
-> Work bottom-up. Each service can be tested in a Python shell before touching any router.
-
-### Step 1 · `api/services/data_service.py`
-
-- [ ] `load_features()` — reads parquet, raises clear error if missing
-- [ ] `get_player()` — filters by player_id + platform, returns dict or None
-- [ ] `list_players()` — filters + selects key columns + limit
-- [ ] `get_dataset_summary()` — total players, churn rate, avg scores, platform list
-
-**Verify:**
-```python
-from api.services.data_service import load_features, get_player, get_dataset_summary
-df = load_features()
-print(df.shape)                          # expect (2000, ~20)
-print(get_player("player_0", "chess_com"))
-print(get_dataset_summary())
-```
-
-Notes:
+- [x] OpenDota collector (`collectors/opendota.py`)
+- [x] RAWG collector with review fetching (`collectors/rawg.py`)
+- [x] Feature engineering (`features/engineer.py`, `standardize.py`, `build.py`)
+- [x] ML model training — XGBoost, LightGBM, CatBoost, Ensemble, SHAP (`models/train.py`)
+- [x] Synthetic data generation (`models/synthetic.py`)
+- [x] Model artifacts (`models/*.joblib`)
+- [x] NLP notebook (`notebooks/01_review_text_analysis.ipynb`) — RoBERTa + GPT summaries
+- [x] FastAPI app structure (`api/main.py`, `api/config.py`)
+- [x] Registries (`api/registry/game_registry.py`, `model_registry.py`)
+- [x] Router signatures (`api/routers/players.py`, `chat.py`)
+- [x] Service stubs (`api/services/data_service.py`, `model_service.py`, `shap_service.py`)
+- [x] Agent stub (`api/agents/churn_analyst.py`)
+- [x] Frontend structure (`frontend/src/` — all components/hooks/api stubs)
+- [x] `get_llm()` factory in `api/config.py` — Groq/OpenAI switchable via env var
+- [x] `langchain-groq` installed
+- [x] Demo mode — explicit synthetic data mode, separate from real pipeline
+  - [x] Silent fallback removed from `train.py` (raises clear error instead)
+  - [x] `api/services/demo_service.py` — generates/scores/SHAP 50 synthetic players, cached
+  - [x] `api/routers/demo.py` — `/api/v1/demo/*` endpoints (summary, players, player, chat)
+  - [x] `api/main.py` — demo router registered
+  - [x] `frontend/src/api/demo.js` — demo API calls + streaming chat
+  - [x] `frontend/src/components/DemoBanner/` — orange banner with "Exit Demo" button
 
 ---
 
-### Step 2 · `api/services/model_service.py`
+## Phase 1 — Steam Collector ✓
 
-- [ ] Cross-check `FEATURE_COLUMNS` list against actual parquet columns
-- [ ] `load_scaler()` — loads `models/scaler.joblib`
-- [ ] `load_model()` — loads requested model by registry ID
-- [ ] `predict_churn()` — arranges features → scale → predict_proba → risk label
+> Unblocks real behavioral data from the most recognizable gaming platform.
 
-**Verify:**
-```python
-from api.services.data_service import get_player
-from api.services.model_service import predict_churn
-player = get_player("player_0", "chess_com")
-print(predict_churn(player))             # expect: { churn_probability, risk_level, ... }
-```
-
-Notes:
+- [x] `src/game_churn/collectors/steam.py`
+  - [x] `get_player_summary(steam_id)` — profile, last_logoff
+  - [x] `get_owned_games(steam_id)` — all games with playtime_forever
+  - [x] `get_recently_played(steam_id)` — games played in last 2 weeks + playtime_2weeks
+  - [x] `get_friend_list(steam_id)` — social graph (handles private profiles gracefully)
+  - [x] `get_game_reviews(app_id)` — cursor-paginated reviews for NLP agent
+  - [x] `collect(steam_id)` — saves 4 files to `data/01_raw/steam/`
+- [x] `game_registry.py` — Steam entry active
+- [x] `run_all.py` — Steam sample players wired in
+- [x] 4/4 collector tests passing
 
 ---
 
-### Step 3 · `api/services/shap_service.py`
+## Phase 2 — Multi-tenant Foundation
 
-- [ ] Inspect `models/shap_values.joblib` structure before implementing:
-  ```python
-  import joblib; d = joblib.load("models/shap_values.joblib"); print(type(d), d.keys() if isinstance(d, dict) else "")
-  ```
-- [ ] `load_shap_values()` — loads the file
-- [ ] `get_player_shap()` — finds player row, pairs with feature names, sorts by abs value
+> Studios need isolated data and API keys before anything else can be studio-scoped.
 
-**Verify:**
-```python
-from api.services.shap_service import get_player_shap
-print(get_player_shap("player_0", "chess_com"))
-```
-
-Notes:
+- [ ] `api/models/studio.py` — Pydantic schemas: `Studio`, `FieldMap`, `StudioCreate`
+- [ ] `api/services/studio_service.py` — create studio, validate API key, load config (SQLite via stdlib)
+- [ ] `api/middleware/auth.py` — `X-Studio-API-Key` header → `studio_id` on every request
+- [ ] `api/routers/studios.py` — `POST /api/v1/studios` (register), `GET /api/v1/studios/me`
+- [ ] `api/main.py` — register new routers, add auth middleware
+- [ ] Verify: register a studio, get back an API key, use it in a subsequent request
 
 ---
 
-## Phase 2 — Backend Routers
+## Phase 3 — Event Ingestion + Schema Agent
 
-> Start the server after each step and test in `/docs`.
+> Studios can POST any JSON. Schema agent normalizes it.
 
-```bash
-uvicorn api.main:app --reload --port 8000
-# then open http://localhost:8000/docs
-```
-
-### Step 4 · `api/routers/players.py`
-
-- [ ] `get_games()` — returns `get_supported_games()` (1 line)
-- [ ] `get_models()` — returns `list_models()` (1 line)
-- [ ] `search_players()` — calls `list_players()`, handles missing file with 503
-- [ ] `get_player_analytics()` — validate platform → get player → predict → shap → combined response
-
-**Test each endpoint in `/docs` before moving on.**
-
-Notes:
+- [ ] `api/services/mapping_service.py` — apply saved `field_map` config to raw event dict
+- [ ] `api/services/ingest_service.py` — validate, normalize raw event → `PlayerActivity`, append to studio's raw store
+- [ ] `api/agents/schema_agent.py` — analyze sample payload, propose field mapping using `get_llm()`
+- [ ] `api/routers/ingest.py`
+  - [ ] `POST /api/v1/ingest/events` — single or batch event ingestion
+  - [ ] `POST /api/v1/ingest/sample` — studio sends 50–100 rows, schema agent infers mapping
+  - [ ] `POST /api/v1/ingest/trigger-training` — kick off feature engineering + model train
+- [ ] Verify: POST a Dota 2 player event, confirm it normalizes and saves correctly
 
 ---
 
-### Step 5 · `api/agents/churn_analyst.py`
+## Phase 4 — NLP Pipeline + NLP Agent
 
-Implement tools first, agent last.
+> Review text → sentiment features that enrich ML predictions.
 
-- [ ] `get_dataset_context` tool — calls `get_dataset_summary()`
-- [ ] `get_player_data` tool — calls `get_player()` + `predict_churn()`
-- [ ] `explain_prediction` tool — calls `get_player_shap()`, formats as readable string
-- [ ] `suggest_retention_strategy` tool — maps top SHAP factors to interventions
-- [ ] `get_agent()` — LLM + tools + prompt + AgentExecutor
-
-**Verify tools before wiring the agent:**
-```python
-from api.agents.churn_analyst import get_player_data, explain_prediction
-print(get_player_data.invoke({"player_id": "player_0", "platform": "chess_com"}))
-print(explain_prediction.invoke({"player_id": "player_0", "platform": "chess_com"}))
-```
-
-Notes:
+- [ ] `src/game_churn/features/text_features.py` — productionize NLP notebook into callable functions
+  - [ ] `clean_text(raw: str) -> str` — strip HTML, normalize
+  - [ ] `score_sentiment(texts: list[str]) -> list[dict]` — RoBERTa batch inference
+  - [ ] `extract_keywords(texts: list[str]) -> list[str]` — top complaint topics
+  - [ ] `summarize_reviews(texts: list[str], game_name: str) -> str` — GPT summary via `get_llm()`
+  - [ ] `build_sentiment_features(reviews: list[dict]) -> pl.DataFrame` — aggregate per player/game
+- [ ] `api/services/nlp_service.py` — wrap `text_features.py`, save sentiment parquet to studio data dir
+- [ ] `api/agents/nlp_agent.py` — orchestrate NLP pipeline on incoming review batches
+- [ ] `api/routers/ingest.py` — `POST /api/v1/ingest/reviews` triggers NLP agent
+- [ ] Merge sentiment features into `features/build.py` so they flow into ML training
+- [ ] Verify: POST reviews → sentiment parquet exists → feature build includes sentiment columns
 
 ---
 
-### Step 6 · `api/routers/chat.py`
+## Phase 5 — Core Backend Services + Training
 
-- [ ] Non-streaming first — `agent.invoke()`, return `{"response": result["output"]}`
-- [ ] Test in `/docs`: ask "What is the overall churn rate?"
-- [ ] Upgrade to streaming — `agent.astream_events()` + `StreamingResponse`
+> Implement the stubs. Everything downstream depends on these.
 
-Notes:
-
----
-
-## Phase 3 — Frontend
-
-> Keep the API server running the whole time. Build one piece, see it render, move on.
-
-```bash
-cd frontend
-npm install
-npm run dev    # http://localhost:5173
-```
-
-### Step 7 · `src/api/players.js`
-
-- [ ] `fetchSupportedGames()`
-- [ ] `fetchModels()`
-- [ ] `fetchPlayerAnalytics(platform, playerId, modelId)`
-- [ ] `fetchPlayers(platform, limit)`
-
-**Verify in browser console:**
-```js
-import('/src/api/players.js').then(m => m.fetchSupportedGames().then(console.log))
-```
-
-Notes:
+- [ ] `api/services/data_service.py` — implement (studio-scoped parquet load, player query, dataset summary)
+- [ ] `api/services/model_service.py` — implement (studio-scoped model load, predict_proba, risk label)
+- [ ] `api/services/shap_service.py` — implement (studio-scoped SHAP load, per-player explanation)
+- [ ] `api/services/training_service.py` — trigger `build.py` → `train.py` for a given studio, save to `models/{studio_id}/`
+- [ ] `api/routers/players.py` — implement all 4 endpoints using the services
+- [ ] Verify via `/docs`:
+  - [ ] `GET /api/v1/players/games` returns OpenDota + Steam
+  - [ ] `GET /api/v1/players/opendota/87278757` returns prediction + SHAP
 
 ---
 
-### Step 8 · `src/hooks/usePlayer.js`
+## Phase 6 — Chat Agent
 
-- [ ] `useState` for player, loading, error
-- [ ] `fetchPlayer` async function with try/catch/finally
-- [ ] `useEffect` — fetch when platform or playerId changes, skip if either is null
-- [ ] Return `{ player, loading, error, refetch }`
+> The conversational layer that makes this usable for non-technical studio staff.
 
-Notes:
-
----
-
-### Step 9 · `PlayerSearch` component
-
-- [ ] Fetch games on mount → populate dropdown
-- [ ] Update input placeholder when platform changes
-- [ ] Call `onSearch(platform, playerId)` on submit
-- [ ] Basic validation (no empty fields)
-
-Notes:
+- [ ] `api/agents/churn_analyst.py` — implement all tools using `get_llm()`:
+  - [ ] `get_player_data(player_id, platform)` — fetch features + churn prediction
+  - [ ] `explain_prediction(player_id, platform)` — SHAP → plain English
+  - [ ] `get_dataset_context()` — fleet-level stats (churn rate, platform breakdown)
+  - [ ] `suggest_retention_strategy(player_id, platform)` — top risk factors → actions
+  - [ ] `get_at_risk_players(limit)` — ranked list of highest-risk players
+  - [ ] `get_agent()` — assemble LangChain agent with all tools + studio-aware system prompt
+- [ ] `api/routers/chat.py` — implement streaming endpoint (`astream_events` + `StreamingResponse`)
+- [ ] Verify: ask "Who are our most at-risk players?" and get a real streamed answer
 
 ---
 
-### Step 10 · `AnalyticsPanel` + `ShapChart`
+## Phase 7 — Frontend
 
-- [ ] Loading state (skeleton or spinner)
-- [ ] Error state (clear message card)
-- [ ] Player header — ID, platform, risk level badge (color coded)
-- [ ] Churn probability display
-- [ ] Key stats grid — engagement score, days since last game, games_7d, win_rate_7d
-- [ ] Pass `shap_values` to `ShapChart`
-- [ ] `ShapChart` — Recharts horizontal bar chart, red/green bars, reference line at 0
+> Make the product usable through a browser.
 
-Notes:
-
----
-
-### Step 11 · `src/api/chat.js` + `src/hooks/useChat.js`
-
-- [ ] `chat.js` — non-streaming version first (fetch + `await res.json()`)
-- [ ] `useChat.js` — messages state, streamingMessage, sendMessage function
-- [ ] `chat.js` — upgrade to streaming (ReadableStream + reader loop)
-- [ ] `useChat.js` — handle streaming chunks with `streamRef`
-
-Notes:
+- [ ] `frontend/src/api/players.js` — implement fetch functions
+- [ ] `frontend/src/api/chat.js` — implement streaming fetch
+- [ ] `frontend/src/api/studios.js` — studio registration + config
+- [ ] `frontend/src/hooks/usePlayer.js` — player fetch state
+- [ ] `frontend/src/hooks/useChat.js` — conversation + streaming state
+- [ ] `frontend/src/components/PlayerSearch/` — platform dropdown + ID input
+- [ ] `frontend/src/components/AnalyticsPanel/` — churn score, risk badge, key stats
+- [ ] `frontend/src/components/ShapChart/` — Recharts horizontal bar (red/green)
+- [ ] `frontend/src/components/SentimentPanel/` — review sentiment trend + top complaints
+- [ ] `frontend/src/components/CohortView/` — high/medium/low risk segment breakdown
+- [ ] `frontend/src/components/ChatPanel/` — streaming agent UI with suggested questions
+- [ ] `frontend/src/pages/Home.jsx` — main dashboard layout
+- [ ] `frontend/src/pages/Onboarding.jsx` — studio registration + field mapping review UI
 
 ---
 
-### Step 12 · `ChatPanel`
+## Phase 8 — Deployment
 
-- [ ] Render message history (user vs assistant styling)
-- [ ] Streaming bubble (live typing effect)
-- [ ] Suggested questions — shown when chat is empty, clickable
-- [ ] Auto-scroll to bottom on new messages (`useRef` + `scrollIntoView`)
-- [ ] Input bar — disabled while loading, submit on Enter or button click
-
-Notes:
-
----
-
-## Phase 4 — Deployment
-
-### Step 13 · Backend → Render
-
-- [ ] Push repo to GitHub
-- [ ] Create Render Web Service, connect repo, confirm `render.yaml` is detected
-- [ ] Set `OPENAI_API_KEY` in Render environment variables
-- [ ] Confirm `/health` returns `{"status": "ok"}`
-- [ ] Confirm `/docs` loads
-- [ ] Add Render URL to `cors_origins` in `api/config.py`
-
-Notes:
-
----
-
-### Step 14 · Frontend → Vercel
-
-- [ ] Connect GitHub repo to Vercel, set root directory to `frontend/`
-- [ ] Set `VITE_API_URL` to Render URL in Vercel environment variables
-- [ ] Confirm player lookup works end to end on the deployed URL
-- [ ] Confirm chat works end to end on the deployed URL
-
-Notes:
+- [ ] Backend → Render (`render.yaml` already configured)
+  - [ ] Set `GROQ_API_KEY`, `STEAM_API_KEY`, `GAME_CHURN_RAWG_API_KEY` in Render env vars
+  - [ ] Confirm `/health` returns `{"status": "ok"}`
+  - [ ] Add Render URL to `cors_origins` in `api/config.py`
+- [ ] Frontend → Vercel
+  - [ ] Set `VITE_API_URL` to Render URL
+  - [ ] Confirm player lookup + chat work end-to-end
 
 ---
 
 ## Blockers / Decisions Log
 
-> Record anything unexpected here so you don't lose context between sessions.
-
 | Date | Issue | Resolution |
 |------|-------|-----------|
-| | | |
+| 2026-03-09 | Dropped Chess.com + Riot — too niche / requires key for demo | Replaced with Steam (more relevant, better data) |
+| 2026-03-09 | Prefect removed — over-engineered for agentic pipeline | Training triggered by `training_service.py` via API |
+| 2026-03-09 | Default LLM switched to Groq | Free tier, fast, reliable tool-calling. Switch to OpenAI via `LLM_PROVIDER=openai` |

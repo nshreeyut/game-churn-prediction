@@ -1,4 +1,11 @@
-"""Standardize raw API data into unified PlayerActivity records."""
+"""Standardize raw API data into unified PlayerActivity records.
+
+Active platforms: OpenDota, Steam
+RAWG is review-only — its output feeds the NLP agent, not this module.
+
+Each standardize_*() function reads the raw JSON saved by its collector
+and returns a list of PlayerActivity records in the shared schema.
+"""
 
 from __future__ import annotations
 
@@ -14,52 +21,6 @@ from game_churn.utils.config import RAW_DIR
 
 def _load_json(path: Path) -> list | dict:
     return json.loads(path.read_text())
-
-
-def standardize_chess_com(username: str, raw_dir: Path | None = None) -> list[PlayerActivity]:
-    """Convert Chess.com raw game data to PlayerActivity records."""
-    base = (raw_dir or RAW_DIR) / "chess_com"
-    games_path = base / f"{username.lower()}_games.json"
-    if not games_path.exists():
-        return []
-
-    games = _load_json(games_path)
-    activities: list[PlayerActivity] = []
-
-    for game in games:
-        ts = game.get("end_time", 0)
-        game_dt = datetime.fromtimestamp(ts, tz=UTC) if ts else datetime.now(tz=UTC)
-
-        # Determine result for the player
-        white = game.get("white", {})
-        black = game.get("black", {})
-        is_white = white.get("username", "").lower() == username.lower()
-        player_data = white if is_white else black
-
-        result_str = player_data.get("result", "unknown")
-        if result_str == "win":
-            result = "win"
-        elif result_str in ("checkmated", "timeout", "resigned", "abandoned"):
-            result = "loss"
-        else:
-            result = "draw"
-
-        rating = player_data.get("rating")
-        time_control = game.get("time_class", "unknown")
-
-        activities.append(
-            PlayerActivity(
-                player_id=username.lower(),
-                platform="chess_com",
-                game_timestamp=game_dt,
-                duration_seconds=0,  # Chess.com doesn't provide duration directly
-                result=result,
-                rating=rating,
-                game_mode=time_control,
-            )
-        )
-
-    return activities
 
 
 def standardize_opendota(account_id: str, raw_dir: Path | None = None) -> list[PlayerActivity]:
@@ -79,7 +40,6 @@ def standardize_opendota(account_id: str, raw_dir: Path | None = None) -> list[P
         )
         duration = match.get("duration", 0)
 
-        # Determine win/loss from player_slot and radiant_win
         player_slot = match.get("player_slot", 0)
         radiant_win = match.get("radiant_win", False)
         is_radiant = player_slot < 128
@@ -100,43 +60,43 @@ def standardize_opendota(account_id: str, raw_dir: Path | None = None) -> list[P
     return activities
 
 
-def standardize_riot(
-    game_name: str, tag_line: str, raw_dir: Path | None = None
-) -> list[PlayerActivity]:
-    """Convert Riot LoL raw match data to PlayerActivity records."""
-    base = (raw_dir or RAW_DIR) / "riot_lol"
-    safe_name = f"{game_name}_{tag_line}".lower()
-    matches_path = base / f"{safe_name}_matches.json"
-    account_path = base / f"{safe_name}_account.json"
+def standardize_steam(steam_id: str, raw_dir: Path | None = None) -> list[PlayerActivity]:
+    """Convert Steam raw data to PlayerActivity records.
 
-    if not matches_path.exists() or not account_path.exists():
+    Reads: {steam_id}_recently_played.json and {steam_id}_summary.json
+    Produces one activity record per recently played game (proxy for session).
+    """
+    base = (raw_dir or RAW_DIR) / "steam"
+    recently_played_path = base / f"{steam_id}_recently_played.json"
+    summary_path = base / f"{steam_id}_summary.json"
+
+    if not recently_played_path.exists():
         return []
 
-    account = _load_json(account_path)
-    puuid = account.get("puuid", "")
-    matches = _load_json(matches_path)
+    recently_played = _load_json(recently_played_path)
+    summary = _load_json(summary_path) if summary_path.exists() else {}
+
+    last_logoff = summary.get("lastlogoff", 0)
+    last_seen = datetime.fromtimestamp(last_logoff, tz=UTC) if last_logoff else datetime.now(tz=UTC)
+
     activities: list[PlayerActivity] = []
 
-    for match in matches:
-        info = match.get("info", {})
-        game_dt = datetime.fromtimestamp(info.get("gameCreation", 0) / 1000, tz=UTC)
-        duration = info.get("gameDuration", 0)
+    games = recently_played.get("response", {}).get("games", [])
+    for game in games:
+        playtime_2weeks = game.get("playtime_2weeks", 0)  # minutes
+        playtime_forever = game.get("playtime_forever", 0)  # minutes
 
-        # Find this player's participant data
-        participants = info.get("participants", [])
-        player_data = next((p for p in participants if p.get("puuid") == puuid), None)
-        if player_data is None:
-            continue
-
+        # Use playtime_2weeks as a session duration proxy
+        # Use last_seen as timestamp (most recent signal we have)
         activities.append(
             PlayerActivity(
-                player_id=safe_name,
-                platform="riot_lol",
-                game_timestamp=game_dt,
-                duration_seconds=duration,
-                result="win" if player_data.get("win") else "loss",
+                player_id=steam_id,
+                platform="steam",
+                game_timestamp=last_seen,
+                duration_seconds=playtime_2weeks * 60,
+                result=None,  # Steam doesn't have win/loss
                 rating=None,
-                game_mode=info.get("gameMode", "unknown"),
+                game_mode=game.get("name", "unknown"),
             )
         )
 
@@ -148,13 +108,6 @@ def load_all_activities(raw_dir: Path | None = None) -> pl.DataFrame:
     base = raw_dir or RAW_DIR
     all_activities: list[PlayerActivity] = []
 
-    # Chess.com
-    chess_dir = base / "chess_com"
-    if chess_dir.exists():
-        for f in chess_dir.glob("*_games.json"):
-            username = f.stem.replace("_games", "")
-            all_activities.extend(standardize_chess_com(username, raw_dir))
-
     # OpenDota
     dota_dir = base / "opendota"
     if dota_dir.exists():
@@ -162,14 +115,12 @@ def load_all_activities(raw_dir: Path | None = None) -> pl.DataFrame:
             account_id = f.stem.replace("_matches", "")
             all_activities.extend(standardize_opendota(account_id, raw_dir))
 
-    # Riot
-    riot_dir = base / "riot_lol"
-    if riot_dir.exists():
-        for f in riot_dir.glob("*_account.json"):
-            safe_name = f.stem.replace("_account", "")
-            parts = safe_name.rsplit("_", 1)
-            if len(parts) == 2:
-                all_activities.extend(standardize_riot(parts[0], parts[1], raw_dir))
+    # Steam
+    steam_dir = base / "steam"
+    if steam_dir.exists():
+        for f in steam_dir.glob("*_recently_played.json"):
+            steam_id = f.stem.replace("_recently_played", "")
+            all_activities.extend(standardize_steam(steam_id, raw_dir))
 
     if not all_activities:
         return pl.DataFrame(

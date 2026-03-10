@@ -18,6 +18,7 @@ numpy
 # LangChain + LLM
 langchain>=0.3.0
 langchain-openai>=0.2.0
+langchain-groq>=0.2.0
 langchain-core>=0.3.0
 
 # ML models (needed to deserialize the .joblib files saved during training)

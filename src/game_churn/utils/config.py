@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -20,8 +20,19 @@ class Settings(BaseSettings):
 
     model_config = {"env_prefix": "GAME_CHURN_", "env_file": ".env"}
 
-    riot_api_key: str = Field(default="", description="Riot Games API key")
-    rawg_api_key: str = Field(default="", description="RAWG.io API key")
+    # validation_alias overrides the GAME_CHURN_ prefix so both configs
+    # and .env.example can use the same bare key names
+    steam_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("STEAM_API_KEY", "GAME_CHURN_STEAM_API_KEY"),
+        description="Steam Web API key",
+    )
+    rawg_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("GAME_CHURN_RAWG_API_KEY", "RAWG_API_KEY"),
+        description="RAWG.io API key",
+    )
+    # OpenDota needs no key
 
     churn_threshold_days: int = Field(default=14, description="Days inactive to label as churned")
     request_timeout: int = Field(default=30, description="HTTP request timeout in seconds")

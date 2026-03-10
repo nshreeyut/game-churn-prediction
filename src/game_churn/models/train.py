@@ -56,14 +56,28 @@ TARGET_COL = "churned"
 
 
 def load_features() -> pl.DataFrame:
-    """Load feature data from parquet or generate synthetic data."""
-    parquet_path = FEATURES_DIR / "player_features.parquet"
-    if parquet_path.exists():
-        log.info("Loading features from %s", parquet_path)
-        return pl.read_parquet(parquet_path)
+    """Load feature data from parquet file.
 
-    log.info("No feature data found, generating synthetic dataset for training...")
-    return generate_synthetic_data()
+    Requires real data collected from the game APIs.
+    Run `make collect && make features` first to generate this file.
+
+    For a demo without real data, use the explicit demo mode in the frontend
+    which loads synthetic data through /api/v1/demo — not this pipeline.
+    """
+    parquet_path = FEATURES_DIR / "player_features.parquet"
+    if not parquet_path.exists():
+        raise FileNotFoundError(
+            f"No feature data found at {parquet_path}.\n"
+            "Run the collection pipeline first:\n"
+            "  make collect   ← pulls data from OpenDota + Steam APIs\n"
+            "  make features  ← engineers features from raw data\n"
+            "  make train     ← trains models on real data\n"
+            "\n"
+            "For demo purposes without API keys, use the frontend Demo Mode toggle\n"
+            "which serves synthetic data through /api/v1/demo."
+        )
+    log.info("Loading features from %s", parquet_path)
+    return pl.read_parquet(parquet_path)
 
 
 def prepare_data(

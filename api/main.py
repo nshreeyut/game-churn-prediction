@@ -17,7 +17,7 @@ Then visit:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import players, chat
+from api.routers import players, chat, demo
 from api.config import settings
 
 # Create the FastAPI app instance.
@@ -56,6 +56,7 @@ app.add_middleware(
 # The "v1" lets you release a v2 later without breaking existing clients.
 app.include_router(players.router, prefix="/api/v1/players", tags=["Players"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
+app.include_router(demo.router, prefix="/api/v1/demo", tags=["Demo"])
 
 
 @app.get("/health")

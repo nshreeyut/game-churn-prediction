@@ -1,81 +1,48 @@
 """
 Game Registry
 ==============
-This is the SINGLE place where you register all supported gaming platforms.
+Single source of truth for all active data sources.
 
-WHY A REGISTRY?
----------------
-Without a registry, adding a new game (e.g., Steam) means editing multiple
-files across the codebase: the router, the frontend dropdown, the agent, etc.
+To add a new platform:
+  1. Build collector in src/game_churn/collectors/your_platform.py
+  2. Add standardize_*() in src/game_churn/features/standardize.py
+  3. Add entry here
 
-With a registry, you edit THIS file only. Everything else reads from here.
-This is the Open/Closed Principle: open for extension, closed for modification.
-
-HOW TO ADD A NEW GAME:
------------------------
-1. Build your collector in src/game_churn/collectors/your_game.py
-   (use the existing collectors as a template — they all inherit BaseCollector)
-2. Add a standardizer in src/game_churn/features/standardize.py
-   (converts your game's raw JSON → the shared PlayerActivity format)
-3. Add an entry to GAME_REGISTRY below
-
-That's it. The API endpoint GET /api/v1/players/games returns this list,
-and the React frontend uses it to build the platform dropdown dynamically.
-No frontend code change needed when you add a new game.
+The frontend dropdown and agent tools both read from this registry —
+no other files need to change when you add a platform.
 """
 
 GAME_REGISTRY: dict[str, dict] = {
-    "chess_com": {
-        "display_name": "Chess.com",
-        "collector_class": "game_churn.collectors.chess_com.ChessComCollector",
-        "requires_api_key": False,
-        "player_id_label": "Username",
-        "player_id_example": "hikaru",  # shown as placeholder in the search input
-    },
     "opendota": {
-        "display_name": "OpenDota (Dota 2)",
+        "display_name": "Dota 2 (OpenDota)",
         "collector_class": "game_churn.collectors.opendota.OpenDotaCollector",
         "requires_api_key": False,
         "player_id_label": "Account ID",
         "player_id_example": "87278757",
+        "description": "Dota 2 match history, MMR progression, and social graph via OpenDota API",
     },
-    "riot_lol": {
-        "display_name": "Riot Games (League of Legends)",
-        "collector_class": "game_churn.collectors.riot.RiotCollector",
+    "steam": {
+        "display_name": "Steam",
+        "collector_class": "game_churn.collectors.steam.SteamCollector",
         "requires_api_key": True,
-        "player_id_label": "Riot ID (name#tag)",
-        "player_id_example": "Faker#KR1",
+        "player_id_label": "Steam 64-bit ID",
+        "player_id_example": "76561198012345678",
+        "description": "Steam playtime, recently played games, and friend list",
     },
-    # ──────────────────────────────────────────────────────────
-    # TO ADD STEAM (example):
-    # ──────────────────────────────────────────────────────────
-    # Step 1: create src/game_churn/collectors/steam.py
-    # Step 2: add a standardize_steam() in features/standardize.py
-    # Step 3: uncomment and fill in the entry below
-    #
-    # "steam": {
-    #     "display_name": "Steam",
-    #     "collector_class": "game_churn.collectors.steam.SteamCollector",
-    #     "requires_api_key": True,
-    #     "player_id_label": "Steam 64-bit ID",
-    #     "player_id_example": "76561198012345678",
-    # },
+    # RAWG is a review source — feeds the NLP agent, not the player lookup flow
+    # It does not appear in the player search dropdown
 }
 
 
 def get_supported_games() -> list[dict]:
-    """
-    Returns all registered games as a list, suitable for JSON serialization.
-    Called by GET /api/v1/players/games — the frontend uses this to build
-    the platform dropdown without any hardcoded values.
-    """
+    """Returns all registered platforms as a list for the frontend dropdown."""
     return [{"id": game_id, **metadata} for game_id, metadata in GAME_REGISTRY.items()]
 
 
 def get_game(game_id: str) -> dict:
-    """Look up a single game by its registry ID. Raises KeyError if not found."""
+    """Look up a platform by registry ID. Raises KeyError if not found."""
     if game_id not in GAME_REGISTRY:
         raise KeyError(
-            f"Unknown game: '{game_id}'. Supported: {list(GAME_REGISTRY.keys())}"
+            f"Unknown platform: '{game_id}'. Supported: {list(GAME_REGISTRY.keys())}"
         )
     return GAME_REGISTRY[game_id]

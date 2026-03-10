@@ -18,7 +18,7 @@ def generate_synthetic_data(n_players: int = 2000, seed: int = 42) -> pl.DataFra
     n_churned = int(n_players * 0.3)
     n_active = n_players - n_churned
 
-    platforms = ["chess_com", "opendota", "riot_lol"]
+    platforms = ["opendota", "steam"]
 
     records: list[dict] = []
 

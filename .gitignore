@@ -41,3 +41,13 @@ htmlcov/
 .coverage
 *.log
 .DS_Store
+
+# Environment & secrets
+.env
+
+# Project AI context (local only)
+CLAUDE.md
+
+# DVC (removed from project)
+.dvc/
+.dvcignore
